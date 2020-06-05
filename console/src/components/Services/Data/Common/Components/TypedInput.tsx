@@ -4,17 +4,14 @@ import { JSONB, JSONDTYPE, TEXT, BOOLEAN, getPlaceholder } from '../../utils';
 import JsonInput from '../../../../Common/CustomInputTypes/JsonInput';
 import TextInput from '../../../../Common/CustomInputTypes/TextInput';
 import styles from '../../../../Common/TableCommon/Table.scss';
-import { isColumnAutoIncrement } from '../../../../Common/utils/pgUtils';
+import {
+  isColumnAutoIncrement,
+  TableColumn,
+} from '../../../../Common/utils/pgUtils';
 import SearchableSelect from '../../../../Common/SearchableSelect/SearchableSelect';
 import { ForeignKeyValueSelect } from './ForeignKeyValueSelect';
 
 type Option = { label: string; value: string };
-
-type Column = {
-  column_name: string;
-  data_type: string;
-  column_default: string;
-};
 
 type FkColOption = {
   from: string;
@@ -25,7 +22,7 @@ type FkColOption = {
 
 type Props = {
   enumOptions: Record<string, string[]>;
-  col: Column;
+  col: TableColumn;
   index: number;
   clone: Record<string, any>;
   inputRef: React.Ref<any>;

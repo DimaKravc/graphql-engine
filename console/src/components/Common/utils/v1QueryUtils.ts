@@ -1,6 +1,57 @@
 import { terminateSql } from './sqlUtils';
-import { TableInfo, FkOptions } from '../../Services/Data/Types';
-import { Mapping } from '../../Services/Data/DataActions';
+import { LocalScheduledTriggerState } from '../../Services/Events/CronTriggers/state';
+import { LocalAdhocEventState } from '../../Services/Events/AdhocEvents/Add/state';
+import { LocalEventTriggerState } from '../../Services/Events/EventTriggers/state';
+import { RemoteRelationshipPayload } from '../../Services/Data/TableRelationships/RemoteRelationships/utils';
+import { transformHeaders } from '../Headers/utils';
+import { generateTableDef } from './pgUtils';
+import { Nullable } from './tsUtils';
+
+// TODO add type for the where clause
+
+// TODO extend all queries with v1 query type
+
+export type OrderByType = 'asc' | 'desc';
+export type OrderByNulls = 'first' | 'last';
+
+export type OrderBy = {
+  column: string;
+  type: OrderByType;
+  nulls: Nullable<OrderByNulls>;
+};
+export const makeOrderBy = (
+  column: string,
+  type: OrderByType,
+  nulls: Nullable<OrderByNulls> = 'last'
+): OrderBy => ({
+  column,
+  type,
+  nulls,
+});
+
+export type WhereClause = any;
+
+export type TableDefinition = {
+  name: string;
+  schema: string;
+};
+
+export type FunctionDefinition = {
+  name: string;
+  schema: string;
+};
+
+type GraphQLArgument = {
+  name: string;
+  type: string;
+  description: string;
+};
+
+export type Header = {
+  name: string;
+  value?: string;
+  value_from_env?: string;
+};
 
 export const getRunSqlQuery = (
   sql: string,
@@ -19,12 +70,12 @@ export const getRunSqlQuery = (
 
 export const getCreatePermissionQuery = (
   action: string,
-  tableDef: TableInfo,
+  tableDef: TableDefinition,
   role: string,
-  permission: string
+  permission: any
 ) => {
   return {
-    type: 'create_' + action + '_permission',
+    type: `create_${action}_permission`,
     args: {
       table: tableDef,
       role,
@@ -35,11 +86,11 @@ export const getCreatePermissionQuery = (
 
 export const getDropPermissionQuery = (
   action: string,
-  tableDef: TableInfo,
+  tableDef: TableDefinition,
   role: string
 ) => {
   return {
-    type: 'drop_' + action + '_permission',
+    type: `drop_${action}_permission`,
     args: {
       table: tableDef,
       role,
@@ -47,16 +98,69 @@ export const getDropPermissionQuery = (
   };
 };
 
-export const generateSetCustomTypesQuery = (customTypes: object[]) => {
+type CustomTypeScalar = {
+  name: string;
+  description: string;
+};
+
+type CustomTypeEnumValue = {
+  value: string;
+  description: string;
+};
+type CustomTypeEnum = {
+  name: string;
+  values: CustomTypeEnumValue[];
+  description: string;
+};
+
+type CustomTypeObjectField = {
+  name: string;
+  type: string;
+  description: string;
+};
+type CustomTypeObject = {
+  name: string;
+  description: string;
+  fields: CustomTypeObjectField[];
+};
+
+type CustomTypeInputObjectField = {
+  name: string;
+  type: string;
+  description: string;
+};
+type CustomTypeInputObject = {
+  name: string;
+  description: string;
+  fields: CustomTypeInputObjectField[];
+};
+
+type CustomTypes = {
+  scalars: CustomTypeScalar[];
+  enums: CustomTypeEnum[];
+  objects: CustomTypeObject[];
+  input_objects: CustomTypeInputObject[];
+};
+
+export const generateSetCustomTypesQuery = (customTypes: CustomTypes) => {
   return {
     type: 'set_custom_types',
     args: customTypes,
   };
 };
 
+type ActionDefinition = {
+  arguments: GraphQLArgument[];
+  kind: 'synchronous' | 'asynchronous';
+  output_type: string;
+  handler: string;
+  headers: Header[];
+  forward_client_headers: boolean;
+};
+
 export const generateCreateActionQuery = (
   name: string,
-  definition: string,
+  definition: ActionDefinition,
   comment: string
 ) => {
   return {
@@ -105,10 +209,23 @@ export const getFetchCustomTypesQuery = () => {
   };
 };
 
+type CustomRootFields = {
+  select: string;
+  select_by_pk: string;
+  select_aggregate: string;
+  insert: string;
+  update: string;
+  delete: string;
+};
+
+type CustomColumnNames = {
+  [columnName: string]: string;
+};
+
 export const getSetCustomRootFieldsQuery = (
-  tableDef: TableInfo,
-  rootFields: Record<string, any>,
-  customColumnNames: Record<string, any>
+  tableDef: TableDefinition,
+  rootFields: CustomRootFields,
+  customColumnNames: CustomColumnNames
 ) => {
   return {
     type: 'set_table_custom_fields',
@@ -129,15 +246,15 @@ export const getFetchAllRolesQuery = () => ({
       name: 'hdb_role',
     },
     columns: ['role_name'],
-    order_by: { column: 'role_name', type: 'asc' },
+    order_by: [{ column: 'role_name', type: 'asc' }],
   },
 });
 
+// TODO Refactor and accept role, filter and action name
 export const getCreateActionPermissionQuery = (
   def: { role: string; filter: any },
   actionName: string
 ) => {
-  console.log({ def });
   return {
     type: 'create_action_permission',
     args: {
@@ -153,7 +270,7 @@ export const getCreateActionPermissionQuery = (
 };
 
 export const getUpdateActionQuery = (
-  def: string,
+  def: ActionDefinition,
   actionName: string,
   actionComment: string
 ) => {
@@ -180,7 +297,10 @@ export const getDropActionPermissionQuery = (
   };
 };
 
-export const getSetTableEnumQuery = (tableDef: TableInfo, isEnum: boolean) => {
+export const getSetTableEnumQuery = (
+  tableDef: TableDefinition,
+  isEnum: boolean
+) => {
   return {
     type: 'set_table_is_enum',
     args: {
@@ -190,14 +310,14 @@ export const getSetTableEnumQuery = (tableDef: TableInfo, isEnum: boolean) => {
   };
 };
 
-export const getTrackTableQuery = (tableDef: TableInfo) => {
+export const getTrackTableQuery = (tableDef: TableDefinition) => {
   return {
     type: 'add_existing_table_or_view',
     args: tableDef,
   };
 };
 
-export const getUntrackTableQuery = (tableDef: TableInfo) => {
+export const getUntrackTableQuery = (tableDef: TableDefinition) => {
   return {
     type: 'untrack_table',
     args: {
@@ -207,9 +327,9 @@ export const getUntrackTableQuery = (tableDef: TableInfo) => {
 };
 
 export const getAddComputedFieldQuery = (
-  tableDef: TableInfo,
+  tableDef: TableDefinition,
   computedFieldName: string,
-  definition: object,
+  definition: any, // TODO
   comment: string
 ) => {
   return {
@@ -226,7 +346,7 @@ export const getAddComputedFieldQuery = (
 };
 
 export const getDropComputedFieldQuery = (
-  tableDef: TableInfo,
+  tableDef: TableDefinition,
   computedFieldName: string
 ) => {
   return {
@@ -239,7 +359,7 @@ export const getDropComputedFieldQuery = (
 };
 
 export const getDeleteQuery = (
-  pkClause: object,
+  pkClause: WhereClause,
   tableName: string,
   schemaName: string
 ) => {
@@ -256,10 +376,13 @@ export const getDeleteQuery = (
 };
 
 export const getBulkDeleteQuery = (
-  pkClauses: object[],
+  pkClauses: WhereClause,
   tableName: string,
   schemaName: string
-) => pkClauses.map(pkClause => getDeleteQuery(pkClause, tableName, schemaName));
+) =>
+  pkClauses.map((pkClause: WhereClause) =>
+    getDeleteQuery(pkClause, tableName, schemaName)
+  );
 
 export const getEnumOptionsQuery = (
   request: { enumTableName: string; enumColumnName: string },
@@ -308,6 +431,7 @@ export const exportMetadataQuery = {
   args: {},
 };
 
+// type the metadata
 export const generateReplaceMetadataQuery = (metadataJson: any) => ({
   type: 'replace_metadata',
   args: metadataJson,
@@ -318,86 +442,7 @@ export const resetMetadataQuery = {
   args: {},
 };
 
-export const getFilterByDisplayNameQuery = (
-  searchValue: string,
-  currentSchema: string,
-  fkOpts: FkOptions
-) => ({
-  type: 'select',
-  args: {
-    table: {
-      name: fkOpts.refTable,
-      schema: currentSchema,
-    },
-    columns: [fkOpts.to, fkOpts.displayName],
-    ...(searchValue !== ''
-      ? {
-          where: {
-            [fkOpts.displayName]: { $ilike: `%${searchValue}%` },
-          },
-        }
-      : {}),
-    limit: 20,
-  },
-});
-
-export const getLoadConsoleOptsQuery = () => ({
-  type: 'select',
-  args: {
-    table: {
-      name: 'hdb_version',
-      schema: 'hdb_catalog',
-    },
-    columns: ['hasura_uuid', 'console_state'],
-  },
-});
-
-export const getForeignKeyOptionsQuery = (
-  m: Mapping,
-  currentSchema: string
-) => ({
-  type: 'select',
-  args: {
-    table: {
-      name: m.refTableName,
-      schema: currentSchema,
-    },
-    columns: [m.displayColumnName, m.refColumnName],
-    limit: 20,
-  },
-});
-
-export const generateSelectQuery = (
-  type: string,
-  tableDef:
-    | { tableName: string; schemaName: string }
-    | { name: string; schema: string },
-  {
-    where,
-    limit,
-    offset,
-    order_by,
-    columns,
-  }: {
-    where?: object;
-    limit?: number;
-    offset?: number;
-    order_by?: 'asc' | 'desc';
-    columns: string[];
-  }
-) => ({
-  type,
-  args: {
-    columns,
-    where,
-    limit,
-    offset,
-    order_by,
-    table: tableDef,
-  },
-});
-
-export const getFetchManualTriggersQuery = (tableName: string) => ({
+export const fetchEventTriggersQuery = {
   type: 'select',
   args: {
     table: {
@@ -405,32 +450,208 @@ export const getFetchManualTriggersQuery = (tableName: string) => ({
       schema: 'hdb_catalog',
     },
     columns: ['*'],
-    order_by: {
-      column: 'name',
-      type: 'asc',
-      nulls: 'last',
+    order_by: [{ column: 'name', type: 'asc' }],
+  },
+};
+
+export const fetchScheduledTriggersQuery = {
+  type: 'select',
+  args: {
+    table: {
+      name: 'hdb_cron_triggers',
+      schema: 'hdb_catalog',
     },
-    where: {
-      table_name: tableName,
+    columns: ['*'],
+    order_by: [{ column: 'name', type: 'asc' }],
+  },
+};
+
+export const getBulkQuery = (args: any[]) => {
+  return {
+    type: 'bulk',
+    args,
+  };
+};
+
+export const generateCreateEventTriggerQuery = (
+  state: LocalEventTriggerState,
+  replace = false
+) => {
+  return {
+    type: 'create_event_trigger',
+    args: {
+      name: state.name.trim(),
+      table: state.table,
+      webhook:
+        state.webhook.type === 'static' ? state.webhook.value.trim() : null,
+      webhook_from_env:
+        state.webhook.type === 'env' ? state.webhook.value.trim() : null,
+      insert: state.operations.insert
+        ? {
+            columns: '*',
+          }
+        : null,
+      update: state.operations.update
+        ? {
+            columns: state.operationColumns.map(c => c.name),
+            payload: state.operationColumns.map(c => c.name),
+          }
+        : null,
+      delete: state.operations.delete
+        ? {
+            columns: '*',
+          }
+        : null,
+      enable_manual: state.operations.enable_manual,
+      retry_conf: state.retryConf,
+      headers: transformHeaders(state.headers),
+      replace,
     },
+  };
+};
+
+export const getDropEventTriggerQuery = (name: string) => ({
+  type: 'delete_event_trigger',
+  args: {
+    name: name.trim(),
   },
 });
 
-export const getConsoleOptsQuery = () =>
-  generateSelectQuery(
+export const generateCreateScheduledTriggerQuery = (
+  state: LocalScheduledTriggerState,
+  replace = false
+) => ({
+  type: 'create_cron_trigger',
+  args: {
+    name: state.name.trim(),
+    webhook: state.webhook,
+    schedule: state.schedule,
+    payload: JSON.parse(state.payload),
+    headers: transformHeaders(state.headers),
+    retry_conf: {
+      num_retries: state.retryConf.num_retries,
+      retry_interval_seconds: state.retryConf.interval_sec,
+      timeout_seconds: state.retryConf.timeout_sec,
+      tolerance_seconds: state.retryConf.tolerance_sec,
+    },
+    comment: state.comment,
+    include_in_metadata: state.includeInMetadata,
+    replace,
+  },
+});
+
+export const generateUpdateScheduledTriggerQuery = (
+  state: LocalScheduledTriggerState
+) => generateCreateScheduledTriggerQuery(state, true);
+
+export const getDropScheduledTriggerQuery = (name: string) => ({
+  type: 'delete_cron_trigger',
+  args: {
+    name: name.trim(),
+  },
+});
+
+export const getCreateScheduledEventQuery = (state: LocalAdhocEventState) => {
+  return {
+    type: 'create_scheduled_event',
+    args: {
+      webhook: state.webhook,
+      schedule_at: state.time.toISOString(),
+      headers: transformHeaders(state.headers),
+      retry_conf: {
+        num_retries: state.retryConf.num_retries,
+        retry_interval_seconds: state.retryConf.interval_sec,
+        timeout_seconds: state.retryConf.timeout_sec,
+        tolerance_seconds: state.retryConf.tolerance_sec,
+      },
+      payload: state.payload,
+      comment: state.comment,
+    },
+  };
+};
+
+export type SelectColumn = string | { name: string; columns: SelectColumn[] };
+
+export const getSelectQuery = (
+  type: 'select' | 'count',
+  table: TableDefinition,
+  columns: SelectColumn[],
+  where: Nullable<WhereClause>,
+  offset: Nullable<number>,
+  limit: Nullable<number>,
+  order_by: Nullable<OrderBy[]>
+) => {
+  return {
+    type,
+    args: {
+      table,
+      columns,
+      where,
+      offset,
+      limit,
+      order_by,
+    },
+  };
+};
+
+export const getFetchInvocationLogsQuery = (
+  where: Nullable<WhereClause>,
+  offset: Nullable<number>,
+  order_by: Nullable<OrderBy[]>,
+  limit: Nullable<number>
+) => {
+  return getSelectQuery(
     'select',
-    { name: 'hdb_version', schema: 'hdb_catalog' },
+    generateTableDef('hdb_scheduled_event_invocation_logs', 'hdb_catalog'),
+    ['*'],
+    where,
+    offset,
+    limit,
+    order_by
+  );
+};
+
+export type SelectQueryGenerator = typeof getFetchInvocationLogsQuery;
+
+export const getFetchManualTriggersQuery = (tableDef: TableDefinition) =>
+  getSelectQuery(
+    'select',
+    generateTableDef('event_triggers', 'hdb_catalog'),
+    ['*'],
     {
-      columns: ['hasura_uuid', 'console_state'],
-    }
+      table_name: tableDef.name,
+      schema_name: tableDef.schema,
+    },
+    undefined,
+    undefined,
+    [
+      {
+        column: 'name',
+        type: 'asc',
+        nulls: 'last',
+      },
+    ]
   );
 
-export const getSaveRemoteRelQuery = (args: object, isNew: boolean) => ({
+export const getRedeliverDataEventQuery = (eventId: string) => ({
+  type: 'redeliver_event',
+  args: {
+    event_id: eventId,
+  },
+});
+
+export const getSaveRemoteRelQuery = (
+  args: RemoteRelationshipPayload,
+  isNew: boolean
+) => ({
   type: `${isNew ? 'create' : 'update'}_remote_relationship`,
   args,
 });
 
-export const getDropRemoteRelQuery = (name: string, table: string) => ({
+export const getDropRemoteRelQuery = (
+  name: string,
+  table: TableDefinition
+) => ({
   type: 'delete_remote_relationship',
   args: {
     name,
@@ -446,3 +667,14 @@ export const getRemoteSchemaIntrospectionQuery = (
     name: remoteSchemaName,
   },
 });
+
+export const getConsoleOptsQuery = () =>
+  getSelectQuery(
+    'select',
+    { name: 'hdb_version', schema: 'hdb_catalog' },
+    ['hasura_uuid', 'console_state'],
+    {},
+    null,
+    null,
+    null
+  );
